@@ -1,5 +1,6 @@
 from bs4 import BeautifulSoup as bs
 import pandas as pd
+import sqlite3 
 import urllib.request
 import html5lib
 import re
@@ -67,6 +68,37 @@ class ETFData:
 
 	def second_parse(self): 
 		pass
+
+
+class Portfolio: 
+	def __init__(self): 
+		self.etfs = pd.DataFrame({'etf':[], 'allocation':[], 'true_weight':[]})
+		self.num_etfs = 0
+		# self.stock_holdings = pd.DataFrame()
+		# self.stock_holdings.columns = ['']
+
+	def calculate_weight(self, allocation): 
+		# current total user-entered allocation 
+		total_allocation = self.etfs['allocation'].sum(axis=0) + allocation
+
+		# Calculate current real allocation
+		def true_weight(alloc_input):
+			weight_factor = 1/total_allocation
+			return weight_factor*alloc_input
+
+		# Update real allocation for each row
+		self.etfs['true_weight'] = self.etfs.allocation.map(lambda x: true_weight(x))
+
+		return true_weight(allocation)
+
+	def add(self, ticker): 
+		allocation = float(input("Allocation in portfolio (%): "))/100
+		weight = self.calculate_weight(allocation)
+		self.etfs = self.etfs.append({'etf':ticker, 'allocation':allocation, 'true_weight': weight}, ignore_index=True)
+		self.num_etfs += 1
+		print(self.etfs)
+
+
 
 
 
