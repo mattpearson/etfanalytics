@@ -1,7 +1,6 @@
 from bs4 import BeautifulSoup as bs
 import pandas as pd
 import numpy as np
-import sqlite3 
 import urllib.request
 import html5lib
 import re
@@ -34,6 +33,16 @@ Need function to clean holdings dataframe for cash holdings (ticker is NaN, perc
 
 - Portfolio metrics: 
 	US/International balance (use morningstar quote URLs and scrape for each ETF, then weight)
+
+
+PRIORITY
+Clean Data for Cash Equivalents - group as "cash/other"
+- Empty ticker
+- CASH_USD as ticker
+- "U.S. Dollar" as name
+
+- ensure parser is working for all tickers (spy)
+- second parser and error handling
 
 
 """
@@ -89,7 +98,8 @@ class Portfolio:
 	def __init__(self): 
 		self.etfs = pd.DataFrame({'etf':[], 'allocation':[], 'true_weight':[], 'holdings':[]})
 		self.num_etfs = 0
-		self.stock_holdings = pd.DataFrame({'name':[], 'ticker':[], 'portfolio_allocation':[]})
+		self.num_stocks = 0
+		self.stock_holdings = None
 
 	def calculate_weight(self, allocation): 
 		# current total user-entered allocation 
@@ -106,6 +116,7 @@ class Portfolio:
 		return true_weight(allocation)
 
 	def add(self, ticker, allocation): 
+		ticker = ticker.upper()
 		allocation = float(allocation)/100
 		weight = self.calculate_weight(allocation)
 		holdings = ETFData.get(ticker).holdings
@@ -116,24 +127,21 @@ class Portfolio:
 	def get_stock_allocation(self): 
 		all_holdings = pd.DataFrame({'name':[], 'ticker':[], 'allocation':[], 'portfolio_weight':[]})
 		for each in zip(self.etfs['holdings'], self.etfs['true_weight']):
-			port_etf_weight = each[1]
 			each[0]['portfolio_weight'] = each[0].allocation.map(lambda x: each[1]*x)
 			all_holdings = all_holdings.append(each[0], ignore_index=True)
-		return all_holdings
 
-
-
-
-
-		# self.stock_holdings['stock'] = self.etfs.map(lambda x: list(ETFData.get(x.etf).holdings.ticker.values))
-		# self.stock_holdings['portfolio_allocation']
+		names = all_holdings.drop_duplicates(subset='ticker').drop('allocation', 1).drop('portfolio_weight', 1)
+		grouped_holdings = pd.DataFrame(all_holdings.groupby('ticker')['portfolio_weight'].sum()).reset_index()
+		grouped_holdings = pd.merge(grouped_holdings, names, left_on='ticker', right_on='ticker', how='inner').sort_values(by='portfolio_weight')
+		self.stock_holdings, self.num_stocks = grouped_holdings, len(grouped_holdings)
+		return grouped_holdings
 
 
 
 if __name__ == "__main__": 
 	a = Portfolio()
-	a.add('spy', 8)
-	a.add('vti', 4)
+	a.add('spy', 35)
+	a.add('iyw', 10)
 
 
 
