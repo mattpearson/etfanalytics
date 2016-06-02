@@ -96,44 +96,71 @@ class ETFData:
 
 class Portfolio: 
 	def __init__(self): 
-		self.etfs = pd.DataFrame({'etf':[], 'allocation':[], 'true_weight':[], 'holdings':[]})
+		self.port_etfs = pd.DataFrame({'etf':[], 'allocation':[], 'true_weight':[], 'holdings':[], 'expenses':[], 'weighted_expenses':[]})
 		self.num_etfs = 0
 		self.num_stocks = 0
-		self.stock_holdings = None
+		self.port_stocks = None
+		self.port_expenses = None
 
 	def calculate_weight(self, allocation): 
 		# current total user-entered allocation 
-		total_allocation = self.etfs['allocation'].sum(axis=0) + allocation
+		total_allocation = self.port_etfs['allocation'].sum(axis=0) + allocation
 
 		# Calculate current real allocation
 		def true_weight(alloc_input):
 			weight_factor = 1/total_allocation
 			return weight_factor*alloc_input
 
-		# Update real allocation for each row
-		self.etfs['true_weight'] = self.etfs.allocation.map(lambda x: true_weight(x))
+		# Update real allocation and weighted expenses for each row
+		self.port_etfs['true_weight'] = self.port_etfs.allocation.map(lambda x: true_weight(x))
+		self.port_etfs['weighted_expenses'] = self.port_etfs['expenses']*self.port_etfs['true_weight']
 
 		return true_weight(allocation)
 
 	def add(self, ticker, allocation): 
 		ticker = ticker.upper()
 		allocation = float(allocation)/100
+
+		# real current portfolio weight of allocation (update all values)
 		weight = self.calculate_weight(allocation)
-		holdings = ETFData.get(ticker).holdings
-		self.etfs = self.etfs.append({'etf':ticker, 'allocation':allocation, 'true_weight': weight, 'holdings':holdings}, ignore_index=True).sort_values(by='etf')
+
+		# get holdings Dataframe
+		etf = ETFData.get(ticker)
+		holdings = etf.holdings
+		expense_ratio = etf.expense_ratio
+		weighted_expenses = expense_ratio*weight
+
+		# New ETF row with ticker, allocation, weight, and dataframe of holdings
+		self.port_etfs = self.port_etfs.append({'etf':ticker, 'allocation':allocation, 'true_weight': weight, 'holdings':holdings, 'expenses':expense_ratio, 'weighted_expenses':weighted_expenses}, ignore_index=True).sort_values(by='etf')
 		self.num_etfs += 1
-		print(self.etfs)
+		print(self.port_etfs)
+
+	def get_port_expenses(self): 
+		self.port_expenses = self.port_etfs['weighted_expenses'].sum()
+		return self.port_expenses
 
 	def get_stock_allocation(self): 
+		# empty dataframe to manage all stock holdings for all ETFs
 		all_holdings = pd.DataFrame({'name':[], 'ticker':[], 'allocation':[], 'portfolio_weight':[]})
-		for each in zip(self.etfs['holdings'], self.etfs['true_weight']):
+
+		# for each etf in the self.port_etfs Dataframe
+		for each in zip(self.port_etfs['holdings'], self.port_etfs['true_weight']):
+
+			# each stock's portfolio weight is its allocation within the etf * the etf's real weight in the portfolio
 			each[0]['portfolio_weight'] = each[0].allocation.map(lambda x: each[1]*x)
+
+			# append the dataframe with each set of holdings to the master list
 			all_holdings = all_holdings.append(each[0], ignore_index=True)
 
+		# get list of unique stock names (if tickers are repeated, their names may be different due to capitalization etc)
 		names = all_holdings.drop_duplicates(subset='ticker').drop('allocation', 1).drop('portfolio_weight', 1)
+
+		# generate dataframe with ticker and sum of weights across ETFs using groupby
 		grouped_holdings = pd.DataFrame(all_holdings.groupby('ticker')['portfolio_weight'].sum()).reset_index()
+
+		# merge grouped holdings with list of unique stock names (dropped by the groupby operation)
 		grouped_holdings = pd.merge(grouped_holdings, names, left_on='ticker', right_on='ticker', how='inner').sort_values(by='portfolio_weight')
-		self.stock_holdings, self.num_stocks = grouped_holdings, len(grouped_holdings)
+		self.port_stocks, self.num_stocks = grouped_holdings, len(grouped_holdings)
 		return grouped_holdings
 
 
