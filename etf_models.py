@@ -5,47 +5,12 @@ import urllib.request
 import html5lib
 import re
 
+
+import gzip
+import io
+
 pd.set_option('display.max_columns', 500)
 pd.set_option('display.width', 1000)
-
-"""
-
-ETF Portfolio Visualizer using D3 - Pie Chart of top 50 holdings in your portfolio is one view. As you update your 
-ETF portfolio, it re-calculates your top holdings and adjusts the pie chart. 
-
-Pie chart or bubble chart (bubble - top 50-200 holdings, circular chart composed of bubbles, corresponding in size)
-Pie chart - top 50 (?) holdings, everything else is "other"
-
-Also has a complete list of all of your holdings and their portfolio weightings, as well as showing all the constituent ETFs 
-each holding is present in. 
-
-You have a list of the top 10 most frequently recurring stocks (frequency of appearance in the portfolio, not weighting)
-
-Portfolio correlation metrics? 
-
-As the user adds ETFs to the analysis, seed a SQL database with each dataframe so that when the user is done and tries to run 
-the analysis, the program doesn't need to check dozens of URLs (this could be in the session - like option legs)
-
-Parsing: use try/except, or look for empty list when checking holdings. if conditions false, use other parsing default_parse_method
-(second_parse - control this in the get classmethod)
-
-Need function to clean holdings dataframe for cash holdings (ticker is NaN, percent allocation == 0 or less than 0)
-
-- Portfolio metrics: 
-	US/International balance (use morningstar quote URLs and scrape for each ETF, then weight)
-
-
-PRIORITY
-Clean Data for Cash Equivalents - group as "cash/other"
-- Empty ticker
-- CASH_USD as ticker
-- "U.S. Dollar" as name
-
-- ensure parser is working for all tickers (spy)
-- second parser and error handling
-
-
-"""
 
 # default_parse_method = None
 
@@ -70,7 +35,10 @@ class ETFData:
 		# Get soup
 		base_url='http://etfdailynews.com/tools/what-is-in-your-etf/?FundVariable='
 		url = base_url + str(ticker)
-		html = urllib.request.urlopen(url).read()
+		# decode to unicode, then re-encode to utf-8 to avoid bytes string / gzip
+		html = urllib.request.urlopen(url).read().decode('cp1252').encode('utf-8')
+		# print(type(html))
+		# print(html)
 		soup = bs(html, "lxml")
 
 		# Fetch expense ratio
@@ -127,11 +95,10 @@ class Portfolio:
 		# get holdings Dataframe
 		etf = ETFData.get(ticker)
 		holdings = etf.holdings
-		expense_ratio = etf.expense_ratio
-		weighted_expenses = expense_ratio*weight
+		weighted_expenses = etf.expense_ratio*weight
 
 		# New ETF row with ticker, allocation, weight, and dataframe of holdings
-		self.port_etfs = self.port_etfs.append({'etf':ticker, 'allocation':allocation, 'true_weight': weight, 'holdings':holdings, 'expenses':expense_ratio, 'weighted_expenses':weighted_expenses}, ignore_index=True).sort_values(by='etf')
+		self.port_etfs = self.port_etfs.append({'etf':ticker, 'allocation':allocation, 'true_weight': weight, 'holdings':holdings, 'expenses':etf.expense_ratio, 'weighted_expenses':weighted_expenses}, ignore_index=True).sort_values(by='etf')
 		self.num_etfs += 1
 		print(self.port_etfs)
 
@@ -140,17 +107,18 @@ class Portfolio:
 		return self.port_expenses
 
 	def get_stock_allocation(self): 
-		# empty dataframe to manage all stock holdings for all ETFs
 		all_holdings = pd.DataFrame({'name':[], 'ticker':[], 'allocation':[], 'portfolio_weight':[]})
 
-		# for each etf in the self.port_etfs Dataframe
 		for each in zip(self.port_etfs['holdings'], self.port_etfs['true_weight']):
-
 			# each stock's portfolio weight is its allocation within the etf * the etf's real weight in the portfolio
-			each[0]['portfolio_weight'] = each[0].allocation.map(lambda x: each[1]*x)
-
-			# append the dataframe with each set of holdings to the master list
+			each[0]['portfolio_weight'] = each[0].allocation * each[1]
 			all_holdings = all_holdings.append(each[0], ignore_index=True)
+
+		nulls = all_holdings.loc[all_holdings.ticker.isnull()]
+		cash = all_holdings.loc[all_holdings.ticker.isin(['CASH_USD'])]
+		others = pd.concat([nulls, cash])
+		print(others)
+		print((others['portfolio_weight'].sum())*100)
 
 		# get list of unique stock names (if tickers are repeated, their names may be different due to capitalization etc)
 		names = all_holdings.drop_duplicates(subset='ticker').drop('allocation', 1).drop('portfolio_weight', 1)
@@ -161,7 +129,7 @@ class Portfolio:
 		# merge grouped holdings with list of unique stock names (dropped by the groupby operation)
 		grouped_holdings = pd.merge(grouped_holdings, names, left_on='ticker', right_on='ticker', how='inner').sort_values(by='portfolio_weight')
 		self.port_stocks, self.num_stocks = grouped_holdings, len(grouped_holdings)
-		return grouped_holdings
+		return grouped_holdings 
 
 
 
