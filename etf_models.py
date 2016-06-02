@@ -23,6 +23,7 @@ class ETFData:
 
 	@classmethod
 	def get(cls, ticker): 
+		ticker = ticker.upper()
 		data = cls(ticker)
 		data.first_parse(ticker)
 		return data
@@ -58,8 +59,12 @@ class ETFData:
 		self.holdings = df
 		self.num_holdings = len(df)
 
-	def second_parse(self): 
-		pass
+	def second_parse(self, ticker): 
+		base_url = 'https://www.zacks.com/funds/etf/' 
+		url = base_url + str(ticker) + '/holding'
+		html = urllib.request.urlopen(url).read().decode('cp1252').encode('utf-8')
+		return html
+
 
 
 class Portfolio: 
@@ -86,7 +91,6 @@ class Portfolio:
 		return true_weight(allocation)
 
 	def add(self, ticker, allocation): 
-		ticker = ticker.upper()
 		allocation = float(allocation)/100
 		weight = self.calculate_weight(allocation)
 		etf = ETFData.get(ticker)
