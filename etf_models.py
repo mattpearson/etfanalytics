@@ -97,7 +97,7 @@ class ETFData:
 		# print(df['allocation'].sum())
 
 	@classmethod
-	def get(cls, ticker, method): 
+	def get(cls, ticker, method="first"): 
 		ticker = ticker.upper()
 		data = cls(ticker)
 		if method=="first":
