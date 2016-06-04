@@ -176,10 +176,15 @@ class Portfolio:
 
 if __name__ == "__main__": 
 
-	a = Portfolio()
-	a.add('VNQ', 2)
-	a.add('SPY', 8)
-	a.get_stock_allocation()
+	my_etf_portfolio = Portfolio()
+	my_etf_portfolio.add('VTI', 20)
+	my_etf_portfolio.add('SPY', 20)
+	my_etf_portfolio.add('XLK', 10)
+	my_etf_portfolio.add('IBB', 25)
+	my_etf_portfolio.add('HDV', 15)
+	my_etf_portfolio.add('MGK', 5)
+	my_etf_portfolio.add('IYH', 5)
+	my_etf_portfolio.get_stock_allocation()
 
 
 
