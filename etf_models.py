@@ -3,63 +3,60 @@ import pandas as pd
 import numpy as np
 import urllib.request
 import html5lib
-
 import ast
-
 import re
-import time
-
 
 pd.set_option('display.max_columns', 500)
 pd.set_option('display.width', 1000)
 
-# default_parse_method = None
-
 class ETFData: 
+
 	def __init__(self, ticker): 
 		self.ticker = ticker
 		self.holdings = None
 		self.num_holdings = None
 		self.expense_ratio = None
 
-	@classmethod
-	def get(cls, ticker): 
-		ticker = ticker.upper()
-		data = cls(ticker)
-		data.first_parse(ticker)
-		return data
+	@staticmethod
+	def convert_percent(pct): 
+		if type(pct)==float:
+			return pct/100
+		return float(pct.rstrip('%'))/100
 
 	def first_parse(self, ticker): 
-		# converts percentage string to float
-		def convert_percent(pct):
-			if type(pct)==float:
-				return pct/100
-			return float(pct.rstrip('%'))/100
-
-		# Get soup
-		base_url='http://etfdailynews.com/tools/what-is-in-your-etf/?FundVariable='
-		url = base_url + str(ticker)
-		# decode to unicode, then re-encode to utf-8 to avoid bytes string / gzip
+		"""
+		Default API for fetching ETF holdings. Generates a pandas DataFrame with name, 
+		ticker, allocation for each holding. Equity ETFs only.
+		"""
+		url='http://etfdailynews.com/tools/what-is-in-your-etf/?FundVariable=' + str(ticker)
+		# decode to unicode, then re-encode to utf-8 to avoid gzip
 		html = urllib.request.urlopen(url).read().decode('cp1252').encode('utf-8')
 		soup = bs(html, "lxml")
 
 		# Fetch expense ratio
 		ratio_pattern = re.compile(r'EXPENSE RATIO')
 		percent_pattern = re.compile(r'%$')
-		expense_ratio = soup.find('td', text=ratio_pattern).find_next_sibling('td', text=percent_pattern).text
-		self.expense_ratio = convert_percent(str(expense_ratio))
+		td = soup.find('td', text=ratio_pattern)
+		if not td: 
+			return False
+		expense_ratio = td.find_next_sibling('td', text=percent_pattern).text
+		self.expense_ratio = self.convert_percent(str(expense_ratio))
 
 		# Build Holdings Table
 		first_holding = soup.find(attrs={'class':'evenOdd'}) 
 		holdings_table = "<table>"+str(first_holding.parent.parent)+"</table>"
 
-		# Convert Table to pandas DataFrame
+		# conver to DataFrame
 		df = pd.read_html(holdings_table)[0]
 		df.columns = ['name', 'ticker', 'allocation']
-		df['allocation'] = df.allocation.map(lambda x: convert_percent(x))
+		df['allocation'] = df.allocation.map(lambda x: self.convert_percent(x))
 		self.holdings, self.num_holdings = df, len(df)
 
 	def second_parse(self, ticker): 
+		"""
+		Backup source for holdings (zacks.com). Slower (data is parsed from string,
+		not read into pandas from table element as in first_parse) and less reliable data. Output is in same format.
+		"""
 
 		def clean_name(str_input): 
 			if "<span" in str_input:
@@ -71,9 +68,12 @@ class ETFData:
 			soup = bs(str_input, "lxml")
 			return soup.find('a').text
 
-		base_url = 'https://www.zacks.com/funds/etf/' 
-		url = base_url + str(ticker) + '/holding'
+		def clean_allocation(str_input): 
+			if str_input == "NA":
+				return 0
+			return float(str_input)/100
 
+		url = 'https://www.zacks.com/funds/etf/' + str(ticker) + '/holding'
 		html = urllib.request.urlopen(url).read().decode('cp1252')
 		str_start, str_end = html.find('data:  [  [ '), html.find(' ]  ]')
 		if str_start == -1 or str_end == -1: 
@@ -83,14 +83,32 @@ class ETFData:
 
 		df = pd.DataFrame(holdings_list).drop(2,1).drop(4,1).drop(5,1)
 		df.columns = ['name', 'ticker', 'allocation']
-		df['allocation'] = df.allocation.map(lambda x: float(x)/100)
-
+		df['allocation'] = df.allocation.map(lambda x: clean_allocation(x))
 		df['name'] = df.name.map(lambda x: clean_name(x))
 		df['ticker'] = df.ticker.map(lambda x: clean_ticker(x))
 		self.holdings, self.num_holdings = df, len(df)
 
-		print(df)
-		print(df['allocation'].sum())
+		url2 = 'http://www.etfdb.com/etf/' + str(ticker)
+		html = urllib.request.urlopen(url2).read()
+		soup = bs(html, "lxml")
+		percent_pattern = re.compile(r'%$')
+		expense_ratio = soup.find('span', text='Expense Ratio:').find_next_sibling('span', text=percent_pattern).text
+		self.expense_ratio = self.convert_percent(str(expense_ratio))
+		# print(df['allocation'].sum())
+
+	@classmethod
+	def get(cls, ticker, method): 
+		ticker = ticker.upper()
+		data = cls(ticker)
+		if method=="first":
+			result = data.first_parse(ticker)
+			if result==False: 
+				return False
+		elif method=="second":
+			result = data.second_parse(ticker)
+			if result==False: 
+				return False
+		return data
 
 class Portfolio: 
 	def __init__(self): 
@@ -118,13 +136,18 @@ class Portfolio:
 	def add(self, ticker, allocation): 
 		allocation = float(allocation)/100
 		weight = self.calculate_weight(allocation)
-		etf = ETFData.get(ticker)
+		etf = ETFData.get(ticker, "first")
+		if not etf: 
+			etf = ETFData.get(ticker, "second")
+			if not etf: 
+				return False
+
 		weighted_expenses = etf.expense_ratio*weight
 
 		# New ETF row
 		self.port_etfs = self.port_etfs.append({'etf':ticker, 'allocation':allocation, 'true_weight': weight, 'holdings':etf.holdings, 'expenses':etf.expense_ratio, 'weighted_expenses':weighted_expenses}, ignore_index=True).sort_values(by='etf')
 		self.num_etfs += 1
-		print(self.port_etfs)
+		# print(self.port_etfs)
 
 	def get_port_expenses(self): 
 		self.port_expenses = self.port_etfs['weighted_expenses'].sum()
@@ -153,46 +176,10 @@ class Portfolio:
 
 if __name__ == "__main__": 
 
-	# a = Portfolio()
-	# a.add('VNQ', 2)
-	# a.add('SPY', 8)
-
-	# a = ETFData.get('IBB')
-	# a.second_parse('IBB')
-
 	a = Portfolio()
-	a.add('XLK', 8)
-	a.add('RYT', 4)
-	a.add('IYJ', 2)
-	a.add('ITA', 2)
-	a.add('IYT', 1)
-	a.add('IYH', 6)
-	a.add('IBB', 2)
-	a.add('IHI', 1)
-	a.add('XLE', 3)
-	a.add('XLF', 4)
-	a.add('KRE', 1)
-	a.add('XLP', 2)
-	a.add('XLB', 1)
-	a.add('IYC', 2)
-	a.add('VEA', 5)
-	a.add('HEDJ', 5)
-	a.add('DXJ', 4)
-	a.add('EEMV', 2)
-	a.add('BBRC', 1)
-	a.add('VTI', 5)
-	a.add('MGK', 7)
-	a.add('IOO', 5)
-	a.add('VIG', 3)
-	a.add('HDV', 4)
-	a.add('MDY', 2)
-	a.add('IJR', 2)
-	a.add('AMLP', 2)
 	a.add('VNQ', 2)
 	a.add('SPY', 8)
-
-
-
+	a.get_stock_allocation()
 
 
 
