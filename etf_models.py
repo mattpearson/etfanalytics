@@ -3,11 +3,12 @@ import pandas as pd
 import numpy as np
 import urllib.request
 import html5lib
+
+import ast
+
 import re
+import time
 
-
-import gzip
-import io
 
 pd.set_option('display.max_columns', 500)
 pd.set_option('display.width', 1000)
@@ -56,16 +57,40 @@ class ETFData:
 		df = pd.read_html(holdings_table)[0]
 		df.columns = ['name', 'ticker', 'allocation']
 		df['allocation'] = df.allocation.map(lambda x: convert_percent(x))
-		self.holdings = df
-		self.num_holdings = len(df)
+		self.holdings, self.num_holdings = df, len(df)
 
 	def second_parse(self, ticker): 
+
+		def clean_name(str_input): 
+			if "<span" in str_input:
+				soup = bs(str_input, "lxml")
+				return soup.find('span')['onmouseover'].lstrip("tooltip.show('").rstrip(".');")
+			return str_input
+
+		def clean_ticker(str_input):
+			soup = bs(str_input, "lxml")
+			return soup.find('a').text
+
 		base_url = 'https://www.zacks.com/funds/etf/' 
 		url = base_url + str(ticker) + '/holding'
-		html = urllib.request.urlopen(url).read().decode('cp1252').encode('utf-8')
-		return html
 
+		html = urllib.request.urlopen(url).read().decode('cp1252')
+		str_start, str_end = html.find('data:  [  [ '), html.find(' ]  ]')
+		if str_start == -1 or str_end == -1: 
+			return False
+		list_str = "[["+html[(str_start+12):str_end]+"]]"
+		holdings_list = ast.literal_eval(list_str)
 
+		df = pd.DataFrame(holdings_list).drop(2,1).drop(4,1).drop(5,1)
+		df.columns = ['name', 'ticker', 'allocation']
+		df['allocation'] = df.allocation.map(lambda x: float(x)/100)
+
+		df['name'] = df.name.map(lambda x: clean_name(x))
+		df['ticker'] = df.ticker.map(lambda x: clean_ticker(x))
+		self.holdings, self.num_holdings = df, len(df)
+
+		print(df)
+		print(df['allocation'].sum())
 
 class Portfolio: 
 	def __init__(self): 
@@ -113,7 +138,7 @@ class Portfolio:
 			all_holdings = all_holdings.append(each[0], ignore_index=True)
 
 		# Group holdings with NaN or Cash tickers
-		all_holdings.ix[all_holdings.ticker.isin(["CASH_USD", np.nan]), 'ticker'] = 'N/A'
+		all_holdings.ix[all_holdings.ticker.isin(["CASH_USD", "USD", np.nan]), 'ticker'] = 'N/A'
 		all_holdings.ix[all_holdings.ticker=="N/A", 'name'] = 'Cash/Other'
 
 		# Drop duplicate names, group holdings by ticker and add respective weights, match with names
@@ -127,10 +152,44 @@ class Portfolio:
 
 
 if __name__ == "__main__": 
+
+	# a = Portfolio()
+	# a.add('VNQ', 2)
+	# a.add('SPY', 8)
+
+	# a = ETFData.get('IBB')
+	# a.second_parse('IBB')
+
 	a = Portfolio()
+	a.add('XLK', 8)
+	a.add('RYT', 4)
+	a.add('IYJ', 2)
+	a.add('ITA', 2)
+	a.add('IYT', 1)
+	a.add('IYH', 6)
+	a.add('IBB', 2)
+	a.add('IHI', 1)
+	a.add('XLE', 3)
+	a.add('XLF', 4)
+	a.add('KRE', 1)
+	a.add('XLP', 2)
+	a.add('XLB', 1)
+	a.add('IYC', 2)
+	a.add('VEA', 5)
+	a.add('HEDJ', 5)
+	a.add('DXJ', 4)
+	a.add('EEMV', 2)
+	a.add('BBRC', 1)
+	a.add('VTI', 5)
+	a.add('MGK', 7)
+	a.add('IOO', 5)
+	a.add('VIG', 3)
+	a.add('HDV', 4)
+	a.add('MDY', 2)
+	a.add('IJR', 2)
+	a.add('AMLP', 2)
 	a.add('VNQ', 2)
 	a.add('SPY', 8)
-
 
 
 
