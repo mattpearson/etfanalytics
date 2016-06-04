@@ -42,5 +42,7 @@ Each time the user adds an ETF to the portfolio, that ETF's expense ratio and ho
 27    ULTRAGENYX PHARMACEUTICAL INC   RARE    0.005090
 28             MYRIAD GENETICS INC.   MYGN    0.005019
 29    INTERCEPT PHARMACEUTICALS INC   ICPT    0.005015
+..                              ...    ...         ...
+190        ARATANA THERAPEUTICS INC   PETX    0.000178
 
 ```
