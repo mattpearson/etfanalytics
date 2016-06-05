@@ -16,6 +16,7 @@ class ETFData:
 		self.holdings = None
 		self.num_holdings = None
 		self.expense_ratio = None
+		self.sector_breakdown = None
 
 	@staticmethod
 	def convert_percent(pct): 
@@ -23,7 +24,7 @@ class ETFData:
 			return pct/100
 		return float(pct.rstrip('%'))/100
 
-	def etf_info(self, ticker): 
+	def etf_details(self, ticker): 
 		"""
 		Fetch sector breakdown and expense ratio from ETFDB
 		"""
@@ -31,14 +32,19 @@ class ETFData:
 		html = urllib.request.urlopen(url2).read()
 		soup = bs(html, "lxml")
 
-		# Fetch expense ratio
+		# Save expense ratio
 		percent_pattern = re.compile(r'%$')
 		expense_ratio = soup.find('span', text='Expense Ratio:').find_next_sibling('span', text=percent_pattern).text
+		self.expense_ratio = self.convert_percent(str(expense_ratio))
 
-		# Fetch sector allocation
+		# Fetch sector allocation and convert to list
 		sector_breakdown = ast.literal_eval(soup.find('h3', text='Sector Breakdown').find_next_sibling('table', attrs={'class':'base-table'})['data-chart-series'])
-		print(sector_breakdown)
-		return expense_ratio
+		df = pd.DataFrame(sector_breakdown)
+		df.columns = ['sector', 'allocation']
+		# Remove extra characters from sector names
+		df['sector'] = df.sector.map(lambda x: re.sub(' \(.*?\)', '', x))
+		self.sector_breakdown = df
+		# print(df)
 
 	def holdings_first_parse(self, ticker): 
 		"""
@@ -49,15 +55,6 @@ class ETFData:
 		# decode to unicode, then re-encode to utf-8 to avoid gzip
 		html = urllib.request.urlopen(url).read().decode('cp1252').encode('utf-8')
 		soup = bs(html, "lxml")
-
-		# Fetch expense ratio
-		ratio_pattern = re.compile(r'EXPENSE RATIO')
-		percent_pattern = re.compile(r'%$')
-		td = soup.find('td', text=ratio_pattern)
-		if not td: 
-			return False
-		expense_ratio = td.find_next_sibling('td', text=percent_pattern).text
-		self.expense_ratio = self.convert_percent(str(expense_ratio))
 
 		# Build Holdings Table
 		first_holding = soup.find(attrs={'class':'evenOdd'}) 
@@ -106,14 +103,13 @@ class ETFData:
 		df['ticker'] = df.ticker.map(lambda x: clean_ticker(x))
 		self.holdings, self.num_holdings = df, len(df)
 
-		expense_ratio = self.etf_info(ticker)
-		self.expense_ratio = self.convert_percent(str(expense_ratio))
 		# print(df['allocation'].sum())
 
 	@classmethod
 	def get(cls, ticker, method="first"): 
 		ticker = ticker.upper()
 		data = cls(ticker)
+		data.etf_details(ticker)
 		if method=="first":
 			result = data.holdings_first_parse(ticker)
 			if result==False: 
@@ -126,11 +122,22 @@ class ETFData:
 
 class Portfolio: 
 	def __init__(self): 
-		self.port_etfs = pd.DataFrame({'etf':[], 'allocation':[], 'true_weight':[], 'holdings':[], 'expenses':[], 'weighted_expenses':[]})
+		self.port_etfs = pd.DataFrame({
+			'etf':[], 
+			'allocation':[], 
+			'true_weight':[], 
+			'holdings':[], 
+			'expenses':[], 
+			'weighted_expenses':[], 
+			'sector_breakdown':[]})
 		self.num_etfs = 0
 		self.num_holdings = 0
 		self.port_holdings = None
 		self.port_expenses = None
+		self.sector_breakdown = None
+
+	def display_portfolio(self): 
+		print(self.port_etfs[['etf', 'allocation', 'true_weight', 'expenses', 'weighted_expenses']])
 
 	def calculate_weight(self, allocation): 
 		# current total user-entered allocation 
@@ -159,15 +166,24 @@ class Portfolio:
 		weighted_expenses = etf.expense_ratio*weight
 
 		# New ETF row
-		self.port_etfs = self.port_etfs.append({'etf':ticker, 'allocation':allocation, 'true_weight': weight, 'holdings':etf.holdings, 'expenses':etf.expense_ratio, 'weighted_expenses':weighted_expenses}, ignore_index=True).sort_values(by='etf')
+		self.port_etfs = self.port_etfs.append({'etf':ticker, 
+			'allocation':allocation, 
+			'true_weight': weight, 
+			'holdings':etf.holdings, 
+			'expenses':etf.expense_ratio, 
+			'weighted_expenses':weighted_expenses, 
+			'sector_breakdown':etf.sector_breakdown}, ignore_index=True).sort_values(by='etf')
 		self.num_etfs += 1
-		print(self.port_etfs)
+		print("{} added").format(ticker)
 
 	def get_port_expenses(self): 
 		self.port_expenses = self.port_etfs['weighted_expenses'].sum()
 		return self.port_expenses
 
-	def get_stock_allocation(self): 
+	def get_stock_allocation(self):
+		"""
+		Returns DataFrame with portfolio weight of all individual constituent stocks
+		""" 
 		all_holdings = pd.DataFrame({'name':[], 'ticker':[], 'allocation':[], 'portfolio_weight':[]})
 
 		for each in zip(self.port_etfs['holdings'], self.port_etfs['true_weight']):
@@ -178,7 +194,7 @@ class Portfolio:
 		all_holdings.ix[all_holdings.ticker.isin(["CASH_USD", "USD", np.nan]), 'ticker'] = 'N/A'
 		all_holdings.ix[all_holdings.ticker=="N/A", 'name'] = 'Cash/Other'
 
-		# Drop duplicate names, group holdings by ticker and add respective weights, match with names
+		# Group holdings by ticker and add respective weights, match with names
 		names = all_holdings.drop_duplicates(subset='ticker')[['name','ticker']]
 		grouped_holdings = pd.DataFrame(all_holdings.groupby('ticker')['portfolio_weight'].sum()).reset_index()
 		grouped_holdings = pd.merge(grouped_holdings, names, left_on='ticker', right_on='ticker', how='inner').sort_values(by='portfolio_weight', ascending=False)
@@ -186,20 +202,33 @@ class Portfolio:
 		self.port_holdings, self.num_holdings = grouped_holdings, len(grouped_holdings)
 		return grouped_holdings 
 
+	def get_sector_breakdown(self): 
+		"""
+		Returns DataFrame with portfolio weight of each sector
+		"""
+		all_sectors = pd.DataFrame()
+		for each in zip(self.port_etfs['sector_breakdown'], self.port_etfs['true_weight']):
+			each[0]['portfolio_weight'] = each[0].allocation * each[1]
+			all_sectors = all_sectors.append(each[0], ignore_index=True)
+		grouped_sectors = pd.DataFrame(all_sectors.groupby('sector')['portfolio_weight'].sum()).sort_values(by='portfolio_weight', ascending=False).reset_index()
+		self.sector_breakdown = grouped_sectors
+		return grouped_sectors
 
 
-if __name__ == "__main__": 
 
-	my_etf_portfolio = Portfolio()
-	my_etf_portfolio.add('VTI', 20)
-	my_etf_portfolio.add('SPY', 20)
-	my_etf_portfolio.add('XLK', 10)
-	my_etf_portfolio.add('IBB', 25)
-	my_etf_portfolio.add('HDV', 15)
-	my_etf_portfolio.add('MGK', 5)
-	my_etf_portfolio.add('IYH', 5)
-	my_etf_portfolio.get_stock_allocation()
 
+# if __name__ == "__main__": 
+
+	# a = Portfolio()
+	# a.add('VTI', 20)
+	# a.add('SPY', 20)
+	# a.add('XLK', 10)
+	# a.add('IBB', 25)
+	# a.add('HDV', 15)
+	# a.add('MGK', 5)
+	# a.add('IYH', 5)
+	# a.get_stock_allocation()
+	# a.get_sector_breakdown()
 
 
 
