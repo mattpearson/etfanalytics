@@ -23,7 +23,24 @@ class ETFData:
 			return pct/100
 		return float(pct.rstrip('%'))/100
 
-	def first_parse(self, ticker): 
+	def etf_info(self, ticker): 
+		"""
+		Fetch sector breakdown and expense ratio from ETFDB
+		"""
+		url2 = 'http://www.etfdb.com/etf/' + str(ticker)
+		html = urllib.request.urlopen(url2).read()
+		soup = bs(html, "lxml")
+
+		# Fetch expense ratio
+		percent_pattern = re.compile(r'%$')
+		expense_ratio = soup.find('span', text='Expense Ratio:').find_next_sibling('span', text=percent_pattern).text
+
+		# Fetch sector allocation
+		sector_breakdown = ast.literal_eval(soup.find('h3', text='Sector Breakdown').find_next_sibling('table', attrs={'class':'base-table'})['data-chart-series'])
+		print(sector_breakdown)
+		return expense_ratio
+
+	def holdings_first_parse(self, ticker): 
 		"""
 		Default API for fetching ETF holdings. Generates a pandas DataFrame with name, 
 		ticker, allocation for each holding. Equity ETFs only.
@@ -52,10 +69,11 @@ class ETFData:
 		df['allocation'] = df.allocation.map(lambda x: self.convert_percent(x))
 		self.holdings, self.num_holdings = df, len(df)
 
-	def second_parse(self, ticker): 
+
+	def holdings_second_parse(self, ticker): 
 		"""
 		Backup source for holdings (zacks.com). Slower (data is parsed from string,
-		not read into pandas from table element as in first_parse) and less reliable data. Output is in same format.
+		not read into pandas from table element as in holdings_first_parse) and less reliable data. Output is in same format.
 		"""
 
 		def clean_name(str_input): 
@@ -88,11 +106,7 @@ class ETFData:
 		df['ticker'] = df.ticker.map(lambda x: clean_ticker(x))
 		self.holdings, self.num_holdings = df, len(df)
 
-		url2 = 'http://www.etfdb.com/etf/' + str(ticker)
-		html = urllib.request.urlopen(url2).read()
-		soup = bs(html, "lxml")
-		percent_pattern = re.compile(r'%$')
-		expense_ratio = soup.find('span', text='Expense Ratio:').find_next_sibling('span', text=percent_pattern).text
+		expense_ratio = self.etf_info(ticker)
 		self.expense_ratio = self.convert_percent(str(expense_ratio))
 		# print(df['allocation'].sum())
 
@@ -101,11 +115,11 @@ class ETFData:
 		ticker = ticker.upper()
 		data = cls(ticker)
 		if method=="first":
-			result = data.first_parse(ticker)
+			result = data.holdings_first_parse(ticker)
 			if result==False: 
 				return False
 		elif method=="second":
-			result = data.second_parse(ticker)
+			result = data.holdings_second_parse(ticker)
 			if result==False: 
 				return False
 		return data
@@ -147,7 +161,7 @@ class Portfolio:
 		# New ETF row
 		self.port_etfs = self.port_etfs.append({'etf':ticker, 'allocation':allocation, 'true_weight': weight, 'holdings':etf.holdings, 'expenses':etf.expense_ratio, 'weighted_expenses':weighted_expenses}, ignore_index=True).sort_values(by='etf')
 		self.num_etfs += 1
-		# print(self.port_etfs)
+		print(self.port_etfs)
 
 	def get_port_expenses(self): 
 		self.port_expenses = self.port_etfs['weighted_expenses'].sum()
