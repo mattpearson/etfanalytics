@@ -71,7 +71,6 @@ class ETFData:
 		not read into pandas from table element as in holdings_first_parse) and less reliable data. Output is in same format.
 		"""
 
-		print("second")
 		def clean_name(str_input): 
 			if "<span" in str_input:
 				soup = bs(str_input, "lxml")
@@ -107,14 +106,15 @@ class ETFData:
 		# print(df['allocation'].sum())
 
 	@classmethod
-	def get(cls, ticker, method="first"): 
+	def get(cls, ticker, parse_method): 
 		ticker = ticker.upper()
 		data = cls(ticker)
-		result = data.holdings_second_parse(ticker) if method=="second" else data.holdings_first_parse(ticker)
-		return False if result==False else data
+		result = data.holdings_second_parse(ticker) if parse_method=="second" else data.holdings_first_parse(ticker)
+		return data
 
 class Portfolio: 
-	def __init__(self): 
+	def __init__(self, parse_method="first"): 
+		self.parse_method = parse_method
 		self.port_etfs = pd.DataFrame({
 			'etf':[], 
 			'allocation':[], 
@@ -129,7 +129,7 @@ class Portfolio:
 		self.port_expenses = None
 
 	def display_portfolio(self): 
-		print(self.port_etfs[['etf', 'allocation', 'true_weight', 'expenses', 'weighted_expenses']])
+		return self.port_etfs[['etf', 'allocation', 'true_weight', 'expenses', 'weighted_expenses']]
 
 	def calculate_weight(self, allocation): 
 		# current total user-entered allocation 
@@ -149,12 +149,7 @@ class Portfolio:
 	def add(self, ticker, allocation): 
 		allocation = float(allocation)/100
 		weight = self.calculate_weight(allocation)
-		etf = ETFData.get(ticker, "second")
-		if not etf: 
-			etf = ETFData.get(ticker, "first")
-			if not etf: 
-				return False
-
+		etf = ETFData.get(ticker, self.parse_method)
 		weighted_expenses = etf.expense_ratio*weight
 
 		# New ETF row
@@ -196,62 +191,19 @@ class Portfolio:
 
 
 
-if __name__ == "__main__": 
+# if __name__ == "__main__": 
 
-	# a = Portfolio()
-	# a.add('VTI', 20)
-	# a.add('SPY', 20)
-	# a.add('XLK', 10)
-	# a.add('IBB', 25)
-	# a.add('HDV', 15)
-	# a.add('MGK', 5)
-	# a.add('IYH', 5)
-	# a.get_stock_allocation()
+# 	# a = Portfolio("second")
 
-	a = Portfolio()
-	a.add('AAPL',2)
-	# a.add('XLK', 8)
-	# a.add('RYT', 4)
-	# a.add('IYJ', 2)
-	# a.add('ITA', 2)
-	# a.add('IYT', 1)
-	# a.add('IYH', 6)
-	# a.add('IBB', 2)
-	# a.add('IHI', 1)
-	# a.add('XLE', 3)
-	# a.add('XLF', 4)
-	# a.add('KRE', 1)
-	# a.add('XLP', 2)
-	# a.add('XLB', 1)
-	# a.add('IYC', 2)
-	# a.add('VEA', 5)
-	# a.add('HEDJ', 5)
-	# a.add('DXJ', 4)
-	# a.add('EEMV', 2)
-	# a.add('BBRC', 1)
-	# a.add('VTI', 5)
-	# a.add('MGK', 7)
-	# a.add('IOO', 5)
-	# a.add('VIG', 3)
-	# a.add('HDV', 4)
-	# a.add('MDY', 2)
-	# a.add('IJR', 2)
-	# a.add('AMLP', 2)
-	# a.add('VNQ', 2)
-	# a.add('SPY', 8)
-	# a.get_stock_allocation()
-	# a.get_port_expenses()
-
-
-
-
-
-
-
-
-
-
-
-
+# 	a = Portfolio()
+# 	a.add('VTI', 20)
+# 	a.add('SPY', 20)
+# 	a.add('XLK', 10)
+# 	a.add('IBB', 25)
+# 	a.add('HDV', 15)
+# 	a.add('MGK', 5)
+# 	a.add('IYH', 5)
+# 	a.get_stock_allocation()
+# 	a.get_port_expenses()
 
 
