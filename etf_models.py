@@ -16,7 +16,6 @@ class ETFData:
 		self.holdings = None
 		self.num_holdings = None
 		self.expense_ratio = None
-		self.sector_breakdown = None
 
 	@staticmethod
 	def convert_percent(pct): 
@@ -24,27 +23,16 @@ class ETFData:
 			return pct/100
 		return float(pct.rstrip('%'))/100
 
-	def etf_details(self, ticker): 
+	def get_expenses(self, ticker): 
 		"""
-		Fetch sector breakdown and expense ratio from ETFDB
+		Fetch expense ratio from Y Finance
 		"""
-		url2 = 'http://www.etfdb.com/etf/' + str(ticker)
-		html = urllib.request.urlopen(url2).read()
+		url = 'http://finance.yahoo.com/q/pr?s='+str(ticker)+'+Profile'
+		html = urllib.request.urlopen(url).read()
 		soup = bs(html, "lxml")
-
-		# Save expense ratio
-		percent_pattern = re.compile(r'%$')
-		expense_ratio = soup.find('span', text='Expense Ratio:').find_next_sibling('span', text=percent_pattern).text
-		self.expense_ratio = self.convert_percent(str(expense_ratio))
-
-		# Fetch sector allocation and convert to list
-		sector_breakdown = ast.literal_eval(soup.find('h3', text='Sector Breakdown').find_next_sibling('table', attrs={'class':'base-table'})['data-chart-series'])
-		df = pd.DataFrame(sector_breakdown)
-		df.columns = ['sector', 'allocation']
-		# Remove extra characters from sector names
-		df['sector'] = df.sector.map(lambda x: re.sub(' \(.*?\)', '', x))
-		self.sector_breakdown = df
-		# print(df)
+		percent_pattern = re.compile(r'%$')		
+		ratio = soup.find('td', text='Annual Report Expense Ratio (net)').find_next_sibling('td', text=percent_pattern).text
+		self.expense_ratio = self.convert_percent(ratio)
 
 	def holdings_first_parse(self, ticker): 
 		"""
@@ -60,12 +48,22 @@ class ETFData:
 		first_holding = soup.find(attrs={'class':'evenOdd'}) 
 		holdings_table = "<table>"+str(first_holding.parent.parent)+"</table>"
 
-		# conver to DataFrame
+		# # Fetch expense ratio - backup method
+		# ratio_pattern = re.compile(r'EXPENSE RATIO')		
+		# percent_pattern = re.compile(r'%$')		
+		# td = soup.find('td', text=ratio_pattern)		
+		# if not td: 		
+		# 	return False		
+		# expense_ratio = td.find_next_sibling('td', text=percent_pattern).text		
+		# self.expense_ratio = self.convert_percent(str(expense_ratio))
+
+		# convert to DataFrame
 		df = pd.read_html(holdings_table)[0]
 		df.columns = ['name', 'ticker', 'allocation']
 		df['allocation'] = df.allocation.map(lambda x: self.convert_percent(x))
 		self.holdings, self.num_holdings = df, len(df)
 
+		self.get_expenses(ticker)
 
 	def holdings_second_parse(self, ticker): 
 		"""
@@ -73,6 +71,7 @@ class ETFData:
 		not read into pandas from table element as in holdings_first_parse) and less reliable data. Output is in same format.
 		"""
 
+		print("second")
 		def clean_name(str_input): 
 			if "<span" in str_input:
 				soup = bs(str_input, "lxml")
@@ -103,22 +102,16 @@ class ETFData:
 		df['ticker'] = df.ticker.map(lambda x: clean_ticker(x))
 		self.holdings, self.num_holdings = df, len(df)
 
+		self.get_expenses(ticker)
+
 		# print(df['allocation'].sum())
 
 	@classmethod
 	def get(cls, ticker, method="first"): 
 		ticker = ticker.upper()
 		data = cls(ticker)
-		data.etf_details(ticker)
-		if method=="first":
-			result = data.holdings_first_parse(ticker)
-			if result==False: 
-				return False
-		elif method=="second":
-			result = data.holdings_second_parse(ticker)
-			if result==False: 
-				return False
-		return data
+		result = data.holdings_second_parse(ticker) if method=="second" else data.holdings_first_parse(ticker)
+		return False if result==False else data
 
 class Portfolio: 
 	def __init__(self): 
@@ -128,13 +121,12 @@ class Portfolio:
 			'true_weight':[], 
 			'holdings':[], 
 			'expenses':[], 
-			'weighted_expenses':[], 
-			'sector_breakdown':[]})
+			'weighted_expenses':[]
+			})
 		self.num_etfs = 0
 		self.num_holdings = 0
 		self.port_holdings = None
 		self.port_expenses = None
-		self.sector_breakdown = None
 
 	def display_portfolio(self): 
 		print(self.port_etfs[['etf', 'allocation', 'true_weight', 'expenses', 'weighted_expenses']])
@@ -157,9 +149,9 @@ class Portfolio:
 	def add(self, ticker, allocation): 
 		allocation = float(allocation)/100
 		weight = self.calculate_weight(allocation)
-		etf = ETFData.get(ticker, "first")
+		etf = ETFData.get(ticker, "second")
 		if not etf: 
-			etf = ETFData.get(ticker, "second")
+			etf = ETFData.get(ticker, "first")
 			if not etf: 
 				return False
 
@@ -171,10 +163,9 @@ class Portfolio:
 			'true_weight': weight, 
 			'holdings':etf.holdings, 
 			'expenses':etf.expense_ratio, 
-			'weighted_expenses':weighted_expenses, 
-			'sector_breakdown':etf.sector_breakdown}, ignore_index=True).sort_values(by='etf')
+			'weighted_expenses':weighted_expenses}, ignore_index=True).sort_values(by='etf')
 		self.num_etfs += 1
-		print("{} added").format(ticker)
+		print("{} added".format(ticker))
 
 	def get_port_expenses(self): 
 		self.port_expenses = self.port_etfs['weighted_expenses'].sum()
@@ -202,22 +193,10 @@ class Portfolio:
 		self.port_holdings, self.num_holdings = grouped_holdings, len(grouped_holdings)
 		return grouped_holdings 
 
-	def get_sector_breakdown(self): 
-		"""
-		Returns DataFrame with portfolio weight of each sector
-		"""
-		all_sectors = pd.DataFrame()
-		for each in zip(self.port_etfs['sector_breakdown'], self.port_etfs['true_weight']):
-			each[0]['portfolio_weight'] = each[0].allocation * each[1]
-			all_sectors = all_sectors.append(each[0], ignore_index=True)
-		grouped_sectors = pd.DataFrame(all_sectors.groupby('sector')['portfolio_weight'].sum()).sort_values(by='portfolio_weight', ascending=False).reset_index()
-		self.sector_breakdown = grouped_sectors
-		return grouped_sectors
 
 
 
-
-# if __name__ == "__main__": 
+if __name__ == "__main__": 
 
 	# a = Portfolio()
 	# a.add('VTI', 20)
@@ -228,7 +207,40 @@ class Portfolio:
 	# a.add('MGK', 5)
 	# a.add('IYH', 5)
 	# a.get_stock_allocation()
-	# a.get_sector_breakdown()
+
+	a = Portfolio()
+	a.add('AAPL',2)
+	# a.add('XLK', 8)
+	# a.add('RYT', 4)
+	# a.add('IYJ', 2)
+	# a.add('ITA', 2)
+	# a.add('IYT', 1)
+	# a.add('IYH', 6)
+	# a.add('IBB', 2)
+	# a.add('IHI', 1)
+	# a.add('XLE', 3)
+	# a.add('XLF', 4)
+	# a.add('KRE', 1)
+	# a.add('XLP', 2)
+	# a.add('XLB', 1)
+	# a.add('IYC', 2)
+	# a.add('VEA', 5)
+	# a.add('HEDJ', 5)
+	# a.add('DXJ', 4)
+	# a.add('EEMV', 2)
+	# a.add('BBRC', 1)
+	# a.add('VTI', 5)
+	# a.add('MGK', 7)
+	# a.add('IOO', 5)
+	# a.add('VIG', 3)
+	# a.add('HDV', 4)
+	# a.add('MDY', 2)
+	# a.add('IJR', 2)
+	# a.add('AMLP', 2)
+	# a.add('VNQ', 2)
+	# a.add('SPY', 8)
+	# a.get_stock_allocation()
+	# a.get_port_expenses()
 
 
 
