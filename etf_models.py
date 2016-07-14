@@ -23,16 +23,19 @@ class ETFData:
 			return pct/100
 		return float(pct.rstrip('%'))/100
 
-	def get_expenses(self, ticker): 
-		"""
-		Fetch expense ratio from Y Finance
-		"""
-		url = 'http://finance.yahoo.com/q/pr?s='+str(ticker)+'+Profile'
-		html = urllib.request.urlopen(url).read()
-		soup = bs(html, "lxml")
-		percent_pattern = re.compile(r'%$')		
-		ratio = soup.find('td', text='Annual Report Expense Ratio (net)').find_next_sibling('td', text=percent_pattern).text
-		self.expense_ratio = self.convert_percent(ratio)
+	"""
+	No longer working due to changes to Yahoo Finance site 
+	"""
+	# def get_expenses(self, ticker): 
+	# 	"""
+	# 	Fetch expense ratio from Y Finance
+	# 	"""
+	# 	url = 'http://finance.yahoo.com/q/pr?s='+str(ticker)+'+Profile'
+	# 	html = urllib.request.urlopen(url).read()
+	# 	soup = bs(html, "lxml")
+	# 	percent_pattern = re.compile(r'%$')		
+	# 	ratio = soup.find('td', text='Annual Report Expense Ratio (net)').find_next_sibling('td', text=percent_pattern).text
+	# 	self.expense_ratio = self.convert_percent(ratio)
 
 	def holdings_first_parse(self, ticker): 
 		"""
@@ -48,14 +51,14 @@ class ETFData:
 		first_holding = soup.find(attrs={'class':'evenOdd'}) 
 		holdings_table = "<table>"+str(first_holding.parent.parent)+"</table>"
 
-		# # Fetch expense ratio - backup method
-		# ratio_pattern = re.compile(r'EXPENSE RATIO')		
-		# percent_pattern = re.compile(r'%$')		
-		# td = soup.find('td', text=ratio_pattern)		
-		# if not td: 		
-		# 	return False		
-		# expense_ratio = td.find_next_sibling('td', text=percent_pattern).text		
-		# self.expense_ratio = self.convert_percent(str(expense_ratio))
+		# Fetch expense ratio - backup method if Y Finance not working
+		ratio_pattern = re.compile(r'EXPENSE RATIO')		
+		percent_pattern = re.compile(r'%$')		
+		td = soup.find('td', text=ratio_pattern)		
+		if not td: 		
+			return False		
+		expense_ratio = td.find_next_sibling('td', text=percent_pattern).text		
+		self.expense_ratio = self.convert_percent(str(expense_ratio))
 
 		# convert to DataFrame
 		df = pd.read_html(holdings_table)[0]
@@ -63,10 +66,12 @@ class ETFData:
 		df['allocation'] = df.allocation.map(lambda x: self.convert_percent(x))
 		self.holdings, self.num_holdings = df, len(df)
 
-		self.get_expenses(ticker)
-
 	def holdings_second_parse(self, ticker): 
 		"""
+
+		--- This parsing method does not currently support expense ratios 
+
+
 		Backup source for holdings (zacks.com). Slower (data is parsed from string,
 		not read into pandas from table element as in holdings_first_parse) and less reliable data. Output is in same format.
 		"""
@@ -101,7 +106,7 @@ class ETFData:
 		df['ticker'] = df.ticker.map(lambda x: clean_ticker(x))
 		self.holdings, self.num_holdings = df, len(df)
 
-		self.get_expenses(ticker)
+		# self.get_expenses(ticker)
 
 		# print(df['allocation'].sum())
 
@@ -191,19 +196,19 @@ class Portfolio:
 
 
 
-# if __name__ == "__main__": 
+if __name__ == "__main__": 
 
-# 	# a = Portfolio("second")
+	# a = Portfolio("second")
 
-# 	a = Portfolio()
-# 	a.add('VTI', 20)
-# 	a.add('SPY', 20)
-# 	a.add('XLK', 10)
-# 	a.add('IBB', 25)
-# 	a.add('HDV', 15)
-# 	a.add('MGK', 5)
-# 	a.add('IYH', 5)
-# 	a.get_stock_allocation()
-# 	a.get_port_expenses()
+	a = Portfolio()
+	a.add('VTI', 20)
+	a.add('SPY', 20)
+	a.add('XLK', 10)
+	a.add('IBB', 25)
+	a.add('HDV', 15)
+	a.add('MGK', 5)
+	a.add('IYH', 5)
+	a.get_stock_allocation()
+	a.get_port_expenses()
 
 
