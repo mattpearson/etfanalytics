@@ -9,6 +9,11 @@ import re
 pd.set_option('display.max_columns', 500)
 pd.set_option('display.width', 1000)
 
+
+"""
+Fetch expenses and holdings for a single ETF.
+Three potential sources (etfdailynews, Zacks, Bloomberg) are used to scrape data.
+"""
 class ETFData: 
 
 	def __init__(self, ticker): 
@@ -23,9 +28,22 @@ class ETFData:
 			return pct/100
 		return float(pct.rstrip('%'))/100
 
-	"""
-	No longer working due to changes to Yahoo Finance site 
-	"""
+
+	def get_expenses(self, ticker): 
+		"""
+		Fetch expense ratio from Bloomberg
+		"""
+		url = "http://bloomberg.com/quote/" + str(ticker) + ":US"
+		html = urllib.request.urlopen(url).read()
+		soup = bs(html, "lxml")
+		ratio_pattern = re.compile(r'Expense Ratio')		
+		percent_pattern = re.compile(r'%$')
+		ratio = soup.find('div', text=ratio_pattern).find_next_sibling().text.rstrip('\n ').lstrip('\n ')
+		self.expense_ratio = self.convert_percent(ratio)
+
+		"""
+		Y Finance version no longer working due to changes to site
+		"""
 	# def get_expenses(self, ticker): 
 	# 	"""
 	# 	Fetch expense ratio from Y Finance
@@ -68,12 +86,9 @@ class ETFData:
 
 	def holdings_second_parse(self, ticker): 
 		"""
-
-		--- This parsing method does not currently support expense ratios 
-
-
 		Backup source for holdings (zacks.com). Slower (data is parsed from string,
 		not read into pandas from table element as in holdings_first_parse) and less reliable data. Output is in same format.
+		Zacks may not have data for some ETFs.
 		"""
 
 		def clean_name(str_input): 
@@ -95,7 +110,9 @@ class ETFData:
 		html = urllib.request.urlopen(url).read().decode('cp1252')
 		str_start, str_end = html.find('data:  [  [ '), html.find(' ]  ]')
 		if str_start == -1 or str_end == -1: 
-			return False
+			# If Zacks does not have data for the given ETF
+			print("Could not fetch data for {}".format(ticker))
+			return
 		list_str = "[["+html[(str_start+12):str_end]+"]]"
 		holdings_list = ast.literal_eval(list_str)
 
@@ -106,8 +123,7 @@ class ETFData:
 		df['ticker'] = df.ticker.map(lambda x: clean_ticker(x))
 		self.holdings, self.num_holdings = df, len(df)
 
-		# self.get_expenses(ticker)
-
+		self.get_expenses(ticker)
 		# print(df['allocation'].sum())
 
 	@classmethod
@@ -117,6 +133,12 @@ class ETFData:
 		result = data.holdings_second_parse(ticker) if parse_method=="second" else data.holdings_first_parse(ticker)
 		return data
 
+
+
+"""
+Build a portfolio of ETFs and calculate the weight of individual securities within the portfolio 
+and its overall expense ratio.
+"""
 class Portfolio: 
 	def __init__(self, parse_method="first"): 
 		self.parse_method = parse_method
@@ -155,6 +177,9 @@ class Portfolio:
 		allocation = float(allocation)/100
 		weight = self.calculate_weight(allocation)
 		etf = ETFData.get(ticker, self.parse_method)
+		# if information not found, break
+		if not etf.expense_ratio:
+			return
 		weighted_expenses = etf.expense_ratio*weight
 
 		# New ETF row
@@ -202,7 +227,7 @@ class Portfolio:
 	"""
 	def report(self): 
 		print()
-		print("Number of ETFs in portfolio: {}".format(self.num_etfs))
+		print("Number of ETFs added to portfolio: {}".format(self.num_etfs))
 		print("Overall portfolio expense ratio: {}".format(str(self.port_expenses*100)+'%'))
 		print("Number of total individual holdings: {}".format(self.num_holdings))
 		print("Top 50 holdings: ")
@@ -212,7 +237,7 @@ class Portfolio:
 
 if __name__ == "__main__": 
 
-	# a = Portfolio("second")
+	# a = Portfolio(parse_method="second")
 
 	a = Portfolio()
 	a.add('VTI', 20)
