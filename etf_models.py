@@ -185,10 +185,13 @@ class Portfolio:
 		all_holdings.ix[all_holdings.ticker.isin(["CASH_USD", "USD", np.nan]), 'ticker'] = 'N/A'
 		all_holdings.ix[all_holdings.ticker=="N/A", 'name'] = 'Cash/Other'
 
+		# Drop rows with NaN portfolio weight by only saving finite values
+		all_holdings = all_holdings[np.isfinite(all_holdings['portfolio_weight'])]
+
 		# Group holdings by ticker and add respective weights, match with names
 		names = all_holdings.drop_duplicates(subset='ticker')[['name','ticker']]
 		grouped_holdings = pd.DataFrame(all_holdings.groupby('ticker')['portfolio_weight'].sum()).reset_index()
-		grouped_holdings = pd.merge(grouped_holdings, names, left_on='ticker', right_on='ticker', how='inner').sort_values(by='portfolio_weight', ascending=False)
+		grouped_holdings = pd.merge(grouped_holdings, names, left_on='ticker', right_on='ticker', how='inner').sort_values(by='portfolio_weight', ascending=False).reset_index()
 
 		self.port_holdings, self.num_holdings = grouped_holdings, len(grouped_holdings)
 		return grouped_holdings 
@@ -198,8 +201,12 @@ class Portfolio:
 	Print all relevant information for the ETF portfolio
 	"""
 	def report(self): 
-		pass
-
+		print()
+		print("Number of ETFs in portfolio: {}".format(self.num_etfs))
+		print("Overall portfolio expense ratio: {}".format(str(self.port_expenses*100)+'%'))
+		print("Number of total individual holdings: {}".format(self.num_holdings))
+		print("Top 50 holdings: ")
+		print(self.port_holdings[['name', 'portfolio_weight']].head(50))
 
 
 
@@ -217,5 +224,6 @@ if __name__ == "__main__":
 	a.add('IYH', 5)
 	a.get_stock_allocation()
 	a.get_port_expenses()
+	a.report()
 
 
