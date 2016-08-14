@@ -47,18 +47,18 @@ class ETFData:
 		html = urllib.request.urlopen(url).read().decode('cp1252').encode('utf-8')
 		soup = bs(html, "lxml")
 
-		# Build Holdings Table
-		first_holding = soup.find(attrs={'class':'evenOdd'}) 
-		holdings_table = "<table>"+str(first_holding.parent.parent)+"</table>"
+		# Build Holdings Table - find the only tbody element on the page
+		holdings_table = "<table>" + str(soup.tbody).lstrip('<tbody>').rstrip('</tbody') + "</table>"
 
-		# Fetch expense ratio - backup method if Y Finance not working
-		ratio_pattern = re.compile(r'EXPENSE RATIO')		
+		# Fetch expense ratio
+		ratio_pattern = re.compile(r'Expense Ratio')		
 		percent_pattern = re.compile(r'%$')		
 		td = soup.find('td', text=ratio_pattern)		
 		if not td: 		
 			return False		
-		expense_ratio = td.find_next_sibling('td', text=percent_pattern).text		
-		self.expense_ratio = self.convert_percent(str(expense_ratio))
+		# find_next_siblings returns a Result Set object - take first matching item and strip the tags
+		expense_ratio = str(td.find_next_siblings('td', text=percent_pattern)[0]).lstrip('<td>').rstrip('</td>')		
+		self.expense_ratio = self.convert_percent(expense_ratio)
 
 		# convert to DataFrame
 		df = pd.read_html(holdings_table)[0]
@@ -181,7 +181,7 @@ class Portfolio:
 			each[0]['portfolio_weight'] = each[0].allocation * each[1]
 			all_holdings = all_holdings.append(each[0], ignore_index=True)
 
-		# Group holdings with NaN or Cash tickers
+		# Convert holdings with NaN or Cash tickers to same symbol to be grouped together in next step
 		all_holdings.ix[all_holdings.ticker.isin(["CASH_USD", "USD", np.nan]), 'ticker'] = 'N/A'
 		all_holdings.ix[all_holdings.ticker=="N/A", 'name'] = 'Cash/Other'
 
@@ -192,6 +192,13 @@ class Portfolio:
 
 		self.port_holdings, self.num_holdings = grouped_holdings, len(grouped_holdings)
 		return grouped_holdings 
+
+
+	"""
+	Print all relevant information for the ETF portfolio
+	"""
+	def report(self): 
+		pass
 
 
 
